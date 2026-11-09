@@ -2,6 +2,7 @@ package com.echo1.manbandpro
 
 import android.Manifest
 import android.content.Context
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
@@ -80,14 +81,24 @@ class MainActivity : AppCompatActivity() {
     val io = Executors.newSingleThreadExecutor()
     val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { importSample(pendingRow, it) } }
 
+    // Make a short landscape phone screen behave like a ~400dp-tall screen so the whole UI fits.
+    override fun attachBaseContext(base: Context) {
+        val c = Configuration(base.resources.configuration)
+        val m = base.resources.displayMetrics
+        val target = (minOf(m.widthPixels, m.heightPixels) / 400f * 160f).toInt()
+        if (c.densityDpi > target) c.densityDpi = target
+        super.attachBaseContext(base.createConfigurationContext(c))
+    }
+
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         store = ProjectStore(this)
         val last = getSharedPreferences("echo", 0).getString("last", null)
         proj = (last?.takeIf { it in store.listProjects() } ?: store.listProjects().firstOrNull())?.let { store.open(it).first } ?: store.create("My Beat")
         load()
         fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; isAllCaps = false; setTextColor(Color.WHITE); textSize = 14f
-            background = bg(0xFF1B2130.toInt(), dp(12).toFloat()); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = dp(40); setPadding(dp(14), 0, dp(14), 0); setOnClickListener { f(this) } }
+            background = bg(0xFF1B2130.toInt(), dp(12).toFloat()); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = dp(36); setPadding(dp(12), 0, dp(12), 0); setOnClickListener { f(this) } }
         grid = Grid(this); roll = Roll(this); keys = Keys(this); tl = TL(this); headers = Headers(this); mixer = Mixer(this); leds = Leds(this)
         mixBox = HorizontalScrollView(this).apply { visibility = View.GONE; addView(mixer, FrameLayout.LayoutParams(-2, -1)) }
         projList = LinearLayout(this).gap().apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
@@ -128,7 +139,7 @@ class MainActivity : AppCompatActivity() {
         val title = SpannableString("Echo 1 ManBand Pro").apply { setSpan(ForegroundColorSpan(0xFFFFA52A.toInt()), 15, 18, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
         val topBar = LinearLayout(this).gap().apply { gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(6)); setBackgroundColor(0xFF0F131B.toInt())
             addView(ImageView(this@MainActivity).apply { setImageResource(R.mipmap.ic_launcher) }, LinearLayout.LayoutParams(dp(44), dp(44)))
-            addView(TextView(this@MainActivity).apply { text = title; setTextColor(Color.WHITE); textSize = 20f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC); setPadding(dp(10), 0, dp(10), 0) }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(TextView(this@MainActivity).apply { text = title; setTextColor(Color.WHITE); textSize = 18f; isSingleLine = true; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC); setPadding(dp(10), 0, dp(10), 0) }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(playBtn); addView(stopBtn); addView(recBtn)
             addView(LinearLayout(this@MainActivity).apply { gravity = android.view.Gravity.CENTER_VERTICAL; background = bg(0xFF141923.toInt(), dp(14).toFloat())
                 addView(bpmBtn("\u2212", -1)); addView(bpmText); addView(bpmBtn("+", 1))
@@ -139,7 +150,7 @@ class MainActivity : AppCompatActivity() {
                 .setItems(arrayOf("Metronome: " + (if (metroOn) "On" else "Off"), "Count-in before recording: $countBars bar(s)")) { _, w -> if (w == 0) metroOn = !metroOn else countBars = (countBars + 1) % 3; save() }.show() }) }
         val tabRow = LinearLayout(this).gap().apply { setPadding(dp(8), dp(4), dp(8), dp(4))
             fun tab(label: String, v: View?) { val b = btn(label) { if (v != null) show(v) else Toast.makeText(this@MainActivity, "Projects screen is the next thing to build", Toast.LENGTH_SHORT).show() }
-                if (v != null) tabMap[v] = b; addView(b, LinearLayout.LayoutParams(0, dp(46), 1f)) }
+                if (v != null) tabMap[v] = b; addView(b, LinearLayout.LayoutParams(0, dp(38), 1f)) }
             tab("\u25A6  Sequencer", grid); tab("\u266B  Piano Roll", rollBox); tab("\u2630  Timeline", tlBox); tab("\u2261  Mixer", mixBox); tab("\u2702  Editor", edBox); tab("\u25A4  Projects", projBox) }
         val toolBar = HorizontalScrollView(this).apply { setBackgroundColor(0xFF0F131B.toInt())
             addView(LinearLayout(this@MainActivity).gap().apply { setPadding(dp(8), dp(6), dp(8), dp(6))
@@ -152,14 +163,14 @@ class MainActivity : AppCompatActivity() {
         swingRef = swingText
         fun swingBtn(t: String, d: Int) = btn(t) { swing = (Math.round(swing * 100) + d).coerceIn(0, 50) / 100f; swingText.text = "Swing ${(swing * 100).toInt()}%"; save() }
         val bottom = LinearLayout(this).gap().apply { gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(8), dp(6), dp(8), dp(6)); setBackgroundColor(0xFF121723.toInt())
-            addView(btn("\u25A4 Projects") { show(projBox) })
+            addView(btn("\u25A4") { show(projBox) })
             addView(TextView(this@MainActivity).apply { text = "${proj.name}.emb"; setTextColor(Color.WHITE); background = bg(0xFF1B2130.toInt(), dp(12).toFloat()); setPadding(dp(14), dp(10), dp(14), dp(10)) }.also { chip = it })
             addView(status, LinearLayout.LayoutParams(0, -2, 1f))
             addView(btn("\u23EE") { startStep = 0; tl.invalidate() }); addView(btn("\u25B6", playAction).also { it.setTextColor(0xFF22DD33.toInt()) }); addView(btn("\u25A0") { stopEngine(); recording = false })
             addView(btn("\u23ED") { startStep = minOf((startStep / 16 + 1) * 16, loopBars * 16 - 4); tl.invalidate() })
             addView(LinearLayout(this@MainActivity).apply { gravity = android.view.Gravity.CENTER_VERTICAL; background = bg(0xFF141923.toInt(), dp(14).toFloat())
                 addView(swingText); addView(swingBtn("\u2212", -5)); addView(swingBtn("+", 5)) })
-            addView(leds, LinearLayout.LayoutParams(dp(120), dp(36)))
+            addView(leds, LinearLayout.LayoutParams(dp(90), dp(32)))
             addView(btn("\u2261") { show(mixBox) }) }
         setContentView(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF0B0E14.toInt())
             addView(topBar); addView(tabRow)
@@ -193,7 +204,7 @@ class MainActivity : AppCompatActivity() {
         syncSections()
         io.execute { try { store.autosave(proj) } catch (e: Exception) { }
             val t = java.text.SimpleDateFormat("h:mm a").format(java.util.Date())
-            runOnUiThread { status.text = "  \u2713 Auto Saved $t" } }
+            runOnUiThread { status.text = "\u2713 Saved $t" } }
     }
 
     fun importSample(row: Int, uri: Uri) = io.execute {
