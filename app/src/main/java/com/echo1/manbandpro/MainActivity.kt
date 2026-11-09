@@ -42,9 +42,11 @@ class MainActivity : AppCompatActivity() {
     @Volatile var meterR = 0f
     lateinit var mixer: Mixer
     lateinit var mixBox: HorizontalScrollView
-    fun show(v: View) { for (x in listOf<View>(grid, rollBox, tlBox, mixBox, projBox)) x.visibility = if (x === v) View.VISIBLE else View.GONE
+    fun show(v: View) { for (x in listOf<View>(grid, rollBox, tlBox, mixBox, projBox, edBox)) x.visibility = if (x === v) View.VISIBLE else View.GONE
         for ((view, b) in tabMap) b.background = bg(if (view === v) 0xFF1E6BFF.toInt() else 0xFF171C27.toInt(), dp(14).toFloat())
-        if (v === projBox) refreshProjects() }
+        if (v === projBox) refreshProjects()
+        toolBarRef.visibility = if (v === edBox || v === projBox || v === mixBox) View.GONE else View.VISIBLE
+        if (v !== edBox) edStop() }
     fun active(mute: Boolean, solo: Boolean, any: Boolean) = !mute && (!any || solo)
     fun lGain(vol: Float, pan: Float) = (vol * Math.cos((pan + 1) * Math.PI / 4) * 1.414).toFloat()
     fun rGain(vol: Float, pan: Float) = (vol * Math.sin((pan + 1) * Math.PI / 4) * 1.414).toFloat()
@@ -90,6 +92,23 @@ class MainActivity : AppCompatActivity() {
         mixBox = HorizontalScrollView(this).apply { visibility = View.GONE; addView(mixer, FrameLayout.LayoutParams(-2, -1)) }
         projList = LinearLayout(this).gap().apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
         projBox = ScrollView(this).apply { visibility = View.GONE; addView(projList) }
+        edTitle = TextView(this).apply { text = "Sample Editor: tap Source"; setTextColor(Color.WHITE); textSize = 15f; setPadding(dp(8), dp(4), 0, dp(4)) }
+        wave = Wave(this); edKnob = Knob(this, -24f, 24f, 0f, "GAIN", "dB") { edGainDb = it }
+        val opsRow = HorizontalScrollView(this).apply { addView(LinearLayout(this@MainActivity).gap().apply { setPadding(dp(4), dp(4), dp(4), dp(4))
+            addView(mkBtn("Source") { edChoose() }); addView(mkBtn("\u25B6 Play") { edPlay() }); addView(mkBtn("\u25A0") { edStop() })
+            addView(mkBtn("Trim") { edApply { d, a, b -> d.copyOfRange(a, b) } })
+            addView(mkBtn("Cut") { edApply { d, a, b -> d.copyOfRange(0, a) + d.copyOfRange(b, d.size) } })
+            addView(mkBtn("Reverse") { edApply { d, a, b -> val o = d.copyOf(); for (i in a until b) o[i] = d[b - 1 - (i - a)]; o } })
+            addView(mkBtn("Normalize") { edApply { d, a, b -> var pk = 1; for (i in a until b) pk = maxOf(pk, Math.abs(d[i].toInt())); val k = 31000f / pk
+                val o = d.copyOf(); for (i in a until b) o[i] = (d[i] * k).toInt().coerceIn(-32768, 32767).toShort(); o } })
+            addView(mkBtn("Fade In") { edApply { d, a, b -> val o = d.copyOf(); for (i in a until b) o[i] = (d[i] * ((i - a) / (b - a).toFloat())).toInt().toShort(); o } })
+            addView(mkBtn("Fade Out") { edApply { d, a, b -> val o = d.copyOf(); for (i in a until b) o[i] = (d[i] * ((b - 1 - i) / (b - a).toFloat())).toInt().toShort(); o } })
+            addView(mkBtn("Apply Gain") { val k = 10f.pow(edGainDb / 20f); edApply { d, a, b -> val o = d.copyOf(); for (i in a until b) o[i] = (d[i] * k).toInt().coerceIn(-32768, 32767).toShort(); o }
+                edGainDb = 0f; edKnob.value = 0f; edKnob.invalidate() })
+            addView(mkBtn("Undo") { if (edUndo.isNotEmpty()) { edData = edUndo.removeAt(edUndo.size - 1); wave.selA = 0; wave.selB = 0; wave.invalidate() } })
+            addView(mkBtn("Save") { edSave() }) }) }
+        val edLeft = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(edTitle); addView(wave, LinearLayout.LayoutParams(-1, 0, 1f)); addView(opsRow) }
+        edBox = LinearLayout(this).apply { visibility = View.GONE; addView(edLeft, LinearLayout.LayoutParams(0, -1, 1f)); addView(edKnob, LinearLayout.LayoutParams(dp(170), -1)) }
         tlBox = LinearLayout(this).apply { visibility = View.GONE
             addView(headers, LinearLayout.LayoutParams(400, -1))
             addView(HorizontalScrollView(this@MainActivity).apply { addView(tl, FrameLayout.LayoutParams(-2, -1)) }, LinearLayout.LayoutParams(0, -1, 1f)) }
@@ -121,13 +140,14 @@ class MainActivity : AppCompatActivity() {
         val tabRow = LinearLayout(this).gap().apply { setPadding(dp(8), dp(4), dp(8), dp(4))
             fun tab(label: String, v: View?) { val b = btn(label) { if (v != null) show(v) else Toast.makeText(this@MainActivity, "Projects screen is the next thing to build", Toast.LENGTH_SHORT).show() }
                 if (v != null) tabMap[v] = b; addView(b, LinearLayout.LayoutParams(0, dp(46), 1f)) }
-            tab("\u25A6  Sequencer", grid); tab("\u266B  Piano Roll", rollBox); tab("\u2630  Timeline", tlBox); tab("\u2261  Mixer", mixBox); tab("\u25A4  Projects", projBox) }
+            tab("\u25A6  Sequencer", grid); tab("\u266B  Piano Roll", rollBox); tab("\u2630  Timeline", tlBox); tab("\u2261  Mixer", mixBox); tab("\u2702  Editor", edBox); tab("\u25A4  Projects", projBox) }
         val toolBar = HorizontalScrollView(this).apply { setBackgroundColor(0xFF0F131B.toInt())
             addView(LinearLayout(this@MainActivity).gap().apply { setPadding(dp(8), dp(6), dp(8), dp(6))
                 addView(btn("Undo") { undo() }); addView(btn("Redo") { redo() }); addView(btn("+ Track") { addTrack() }); addView(btn("Split") { splitSelected() }); addView(btn("Del") { deleteSelected() })
                 addView(btn("Len: $noteLen") { noteLen = when (noteLen) { 1 -> 2; 2 -> 4; 4 -> 8; else -> 1 }; it.text = "Len: $noteLen" })
                 addView(btn("Oct -") { basePitch = maxOf(24, basePitch - 12); keys.invalidate(); roll.invalidate() })
                 addView(btn("Oct +") { basePitch = minOf(72, basePitch + 12); keys.invalidate(); roll.invalidate() }) }) }
+        toolBarRef = toolBar
         val swingText = TextView(this).apply { text = "Swing ${(swing * 100).toInt()}%"; setTextColor(Color.WHITE); setPadding(dp(8), 0, dp(8), 0) }
         swingRef = swingText
         fun swingBtn(t: String, d: Int) = btn(t) { swing = (Math.round(swing * 100) + d).coerceIn(0, 50) / 100f; swingText.text = "Swing ${(swing * 100).toInt()}%"; save() }
@@ -143,7 +163,7 @@ class MainActivity : AppCompatActivity() {
             addView(btn("\u2261") { show(mixBox) }) }
         setContentView(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF0B0E14.toInt())
             addView(topBar); addView(tabRow)
-            addView(grid, LinearLayout.LayoutParams(-1, 0, 1f)); addView(rollBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(tlBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(mixBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(projBox, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(grid, LinearLayout.LayoutParams(-1, 0, 1f)); addView(rollBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(tlBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(mixBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(projBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(edBox, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(toolBar); addView(bottom) })
         show(grid)
         val miss = store.missingSamples(proj)
@@ -449,6 +469,66 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    var edData: ShortArray? = null
+    var edName = ""
+    var edGainDb = 0f
+    val edUndo = ArrayList<ShortArray>()
+    var edTrack: AudioTrack? = null
+    lateinit var edBox: LinearLayout
+    lateinit var edTitle: TextView
+    lateinit var wave: Wave
+    lateinit var edKnob: Knob
+    lateinit var toolBarRef: View
+
+    // selection (or whole sample when nothing is selected) as [start, end)
+    fun edSel(): IntArray {
+        val d = edData ?: return intArrayOf(0, 0)
+        val a = minOf(wave.selA, wave.selB).coerceIn(0, d.size); val b = maxOf(wave.selA, wave.selB).coerceIn(0, d.size)
+        return if (b - a > 100) intArrayOf(a, b) else intArrayOf(0, d.size)
+    }
+
+    fun edApply(op: (ShortArray, Int, Int) -> ShortArray) {
+        val d = edData ?: return; val s = edSel()
+        val out = op(d, s[0], s[1])
+        if (out.isEmpty()) { toast("That would leave nothing"); return }
+        edUndo.add(d); if (edUndo.size > 20) edUndo.removeAt(0)
+        edData = out; wave.selA = 0; wave.selB = 0; wave.invalidate()
+    }
+
+    fun edChoose() {
+        val list = proj.samples.map { it.path }
+        if (list.isEmpty()) { toast("Import a sample first (tap a sequencer row name)"); return }
+        AlertDialog.Builder(this).setTitle("Choose sample").setItems(list.toTypedArray()) { _, i ->
+            try { edData = decodeWav(store.resolve(proj, list[i])); edName = list[i].substringAfterLast('/').substringBeforeLast('.')
+                edUndo.clear(); wave.selA = 0; wave.selB = 0; edTitle.text = edName; wave.invalidate() }
+            catch (e: Exception) { toast("Cannot read that file: ${e.message}") } }.show()
+    }
+
+    fun edStop() { edTrack?.let { try { it.stop() } catch (e: Exception) { }; it.release() }; edTrack = null }
+
+    fun edPlay() {
+        edStop(); val d = edData ?: return; val s = edSel(); val g = 10f.pow(edGainDb / 20f)
+        val seg = ShortArray(s[1] - s[0]) { i -> (d[s[0] + i] * g).toInt().coerceIn(-32768, 32767).toShort() }
+        if (seg.isEmpty()) return
+        val at = AudioTrack(AudioManager.STREAM_MUSIC, 44100, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, seg.size * 2, AudioTrack.MODE_STATIC)
+        at.write(seg, 0, seg.size); at.play(); edTrack = at
+    }
+
+    // Writes the edit to "Edited Samples/" (the original is untouched), then offers to use it on a sequencer row.
+    fun edSave() {
+        val d = edData ?: return; val n = d.size * 2
+        val body = ByteArray(n); val bb = java.nio.ByteBuffer.wrap(body).order(java.nio.ByteOrder.LITTLE_ENDIAN); for (v in d) bb.putShort(v)
+        val wav = wavHeader(n) + body
+        io.execute {
+            try {
+                val ref = store.saveEdited(proj, wav, "$edName edit.wav"); cache[ref.path] = d; save()
+                runOnUiThread { AlertDialog.Builder(this).setTitle("Saved: ${ref.path}")
+                    .setItems(Array(8) { i -> if (i < 7) "Use for ${names[i]} row" else "Don't assign" }) { _, i ->
+                        if (i < 7) { pushUndo(); samples[i] = d; paths[i] = ref.path; grid.invalidate(); save() } }.show() }
+            } catch (e: Exception) { runOnUiThread { toast("Save failed: ${e.message}") } }
+        }
+    }
+
     fun spf() = (44100 * 60 / bpm / 4).toInt()
 
     fun loadTracks() {
@@ -667,6 +747,86 @@ class MainActivity : AppCompatActivity() {
                 p.color = if (pitch % 12 in setOf(1, 3, 6, 8, 10)) Color.BLACK else 0xFFE8E8F0.toInt()
                 cv.drawRect(0f, r * rh, width.toFloat(), (r + 1) * rh - 1, p)
                 if (pitch % 12 == 0) { p.color = Color.DKGRAY; cv.drawText("C${pitch / 12 - 1}", 8f, r * rh + rh - 8, p) } }
+        }
+    }
+
+    inner class Wave(c: Context) : View(c) {
+        var selA = 0; var selB = 0; var drag = 0
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        fun fx(f: Int): Float { val d = edData ?: return 0f; return f * width.toFloat() / d.size }
+        override fun onDraw(cv: Canvas) {
+            p.style = Paint.Style.FILL; p.color = 0xFF0F131B.toInt(); cv.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+            val d = edData
+            if (d == null || d.isEmpty()) { p.color = Color.GRAY; p.textSize = dp(14).toFloat(); cv.drawText("Tap Source to choose a sample", dp(12).toFloat(), height / 2f, p); return }
+            val mid = height / 2f; p.color = 0xFF2A3245.toInt(); cv.drawRect(0f, mid - 1, width.toFloat(), mid + 1, p)
+            p.color = 0xFF18C8F0.toInt(); p.strokeWidth = 1.5f
+            for (x in 0 until width) {
+                val i0 = (x.toLong() * d.size / width).toInt(); val i1 = maxOf(i0 + 1, ((x + 1).toLong() * d.size / width).toInt()).coerceAtMost(d.size)
+                var mn = 32767; var mx = -32768; val st = maxOf(1, (i1 - i0) / 32); var i = i0
+                while (i < i1) { val v = d[i].toInt(); if (v < mn) mn = v; if (v > mx) mx = v; i += st }
+                if (mx >= mn) cv.drawLine(x.toFloat(), mid - mx / 32768f * mid, x.toFloat(), mid - mn / 32768f * mid, p)
+            }
+            if (selB != selA) { val a = fx(minOf(selA, selB)); val b = fx(maxOf(selA, selB))
+                p.color = 0x3318C8F0; cv.drawRect(a, 0f, b, height.toFloat(), p); p.color = Color.WHITE; cv.drawRect(a, 0f, a + 3, height.toFloat(), p); cv.drawRect(b - 3, 0f, b, height.toFloat(), p) }
+        }
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            val d = edData ?: return true
+            val f = (e.x.coerceIn(0f, width - 1f) * d.size / width).toInt()
+            when (e.action) {
+                MotionEvent.ACTION_DOWN -> { drag = if (selB != selA && Math.abs(e.x - fx(selA)) < dp(24)) 1 else if (selB != selA && Math.abs(e.x - fx(selB)) < dp(24)) 2 else 3
+                    if (drag == 3) { selA = f; selB = f } }
+                MotionEvent.ACTION_MOVE -> { if (drag == 1) selA = f else selB = f }
+                MotionEvent.ACTION_UP -> { if (selA > selB) { val t = selA; selA = selB; selB = t }; drag = 0 }
+            }
+            invalidate(); return true
+        }
+    }
+
+    // Rotary knob: glowing arc from centre (blue below, orange above), tick ring, brushed-metal cap. Drag up/down to turn, double-tap to reset.
+    inner class Knob(c: Context, val lo: Float, val hi: Float, val def: Float, val label: String, val unit: String, val onChange: (Float) -> Unit) : View(c) {
+        var value = def
+        val p = Paint(Paint.ANTI_ALIAS_FLAG); var y0 = 0f; var v0 = 0f
+        val gd = android.view.GestureDetector(c, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onDoubleTap(e: MotionEvent): Boolean { value = def; onChange(value); invalidate(); return true } })
+        fun ang(v: Float) = 135f + 270f * (v - lo) / (hi - lo)
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            gd.onTouchEvent(e)
+            when (e.action) {
+                MotionEvent.ACTION_DOWN -> { y0 = e.y; v0 = value; parent.requestDisallowInterceptTouchEvent(true) }
+                MotionEvent.ACTION_MOVE -> { value = (v0 + (y0 - e.y) / dp(260) * (hi - lo)).coerceIn(lo, hi); onChange(value); invalidate() }
+            }
+            return true
+        }
+        override fun onDraw(cv: Canvas) {
+            val txt = dp(34).toFloat(); val cx = width / 2f; val cy = (height - txt) / 2f; val R = minOf(width / 2f, cy) - dp(2)
+            val zero = if (lo < 0f && hi > 0f) 0f else lo
+            p.style = Paint.Style.FILL; p.shader = null; p.textAlign = Paint.Align.CENTER; p.textSize = R * 0.11f
+            for (k in 0..16) { val v = lo + k * (hi - lo) / 16f; val a = Math.toRadians(ang(v).toDouble()); val major = k % 2 == 0
+                val lit = if (value >= zero) v in zero..value else v in value..zero
+                val base = if (v > zero) 0xFFFFA020.toInt() else if (v < zero) 0xFF3AA0FF.toInt() else Color.WHITE
+                p.color = if (lit) base else (base and 0x00FFFFFF) or 0x66000000
+                p.style = Paint.Style.STROKE; p.strokeWidth = if (major) R * 0.035f else R * 0.02f; p.strokeCap = Paint.Cap.ROUND
+                val r1 = if (major) R * 0.66f else R * 0.70f; val r2 = R * 0.78f
+                cv.drawLine(cx + (Math.cos(a) * r1).toFloat(), cy + (Math.sin(a) * r1).toFloat(), cx + (Math.cos(a) * r2).toFloat(), cy + (Math.sin(a) * r2).toFloat(), p)
+                if (major) { p.style = Paint.Style.FILL; p.color = 0xFFB0B6C2.toInt()
+                    cv.drawText(if (v > 0) "+${v.toInt()}" else "${v.toInt()}", cx + (Math.cos(a) * R * 0.92).toFloat(), cy + (Math.sin(a) * R * 0.92).toFloat() + R * 0.04f, p) } }
+            val ra = R * 0.58f; val oval = RectF(cx - ra, cy - ra, cx + ra, cy + ra)
+            p.style = Paint.Style.STROKE; p.strokeCap = Paint.Cap.ROUND; p.strokeWidth = R * 0.03f; p.color = 0xFF1A2230.toInt(); cv.drawArc(oval, 135f, 270f, false, p)
+            val glow = if (value >= zero) 0xFFFFA020.toInt() else 0xFF3AA0FF.toInt(); val sweep = ang(value) - ang(zero)
+            p.strokeWidth = R * 0.08f; p.color = (glow and 0x00FFFFFF) or 0x33000000; cv.drawArc(oval, ang(zero), sweep, false, p)
+            p.strokeWidth = R * 0.03f; p.color = glow; cv.drawArc(oval, ang(zero), sweep, false, p)
+            p.style = Paint.Style.FILL; p.color = 0xFF0C0D0F.toInt(); cv.drawCircle(cx, cy, R * 0.54f, p)
+            p.shader = RadialGradient(cx - R * 0.12f, cy - R * 0.18f, R * 0.5f, intArrayOf(0xFF4A4E55.toInt(), 0xFF15171A.toInt()), null, Shader.TileMode.CLAMP)
+            cv.drawCircle(cx, cy, R * 0.47f, p)
+            p.shader = SweepGradient(cx, cy, intArrayOf(0x00FFFFFF, 0x33FFFFFF, 0x00FFFFFF, 0x2AFFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.2f, 0.5f, 0.75f, 1f))
+            cv.drawCircle(cx, cy, R * 0.47f, p); p.shader = null
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f; p.color = 0xFF6A6E75.toInt(); cv.drawCircle(cx, cy, R * 0.47f, p)
+            val a = Math.toRadians(ang(value).toDouble()); p.color = Color.WHITE; p.strokeWidth = R * 0.045f
+            cv.drawLine(cx + (Math.cos(a) * R * 0.2).toFloat(), cy + (Math.sin(a) * R * 0.2).toFloat(), cx + (Math.cos(a) * R * 0.4).toFloat(), cy + (Math.sin(a) * R * 0.4).toFloat(), p)
+            p.style = Paint.Style.FILL; p.color = 0xFFB0B6C2.toInt(); p.textSize = dp(15).toFloat(); cv.drawText(label, cx, cy + R + dp(14), p)
+            p.color = Color.GRAY; p.textSize = dp(11).toFloat(); cv.drawText("%+.1f %s".format(value, unit), cx, cy + R + dp(29), p)
+            p.textAlign = Paint.Align.LEFT
         }
     }
 

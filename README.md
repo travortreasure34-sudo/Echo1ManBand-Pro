@@ -11,3 +11,4 @@ Metronome: Metro On/Off clicks on every beat (accent on bar 1). Count-in (0/1/2 
 Undo/Redo (50 steps) covers sequencer steps, piano roll notes, row samples, tracks and regions. Timeline: drag a region's left/right edge to trim (selected regions show white handles); drag the middle to move.
 UI: restyled to the dark mockup (top bar, tab row, sequencer with S/M per row, bottom transport with swing + LED meter). Settings gear = metronome / count-in. Loop switch + bars. Sampler, Sample Editor and Projects screens not built yet.
 Projects tab: New, Open, Rename, Duplicate, Recover (latest autosave), Delete (with confirmation). The last opened project reopens on launch.
+Sample Editor tab: choose a sample, drag on the waveform to select, Trim/Cut/Reverse/Normalize/Fade/Gain (knob), Play, Undo, Save (to Edited Samples/, original untouched) then assign to a sequencer row.
