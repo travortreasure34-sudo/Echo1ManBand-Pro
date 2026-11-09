@@ -42,8 +42,9 @@ class MainActivity : AppCompatActivity() {
     @Volatile var meterR = 0f
     lateinit var mixer: Mixer
     lateinit var mixBox: HorizontalScrollView
-    fun show(v: View) { for (x in listOf<View>(grid, rollBox, tlBox, mixBox)) x.visibility = if (x === v) View.VISIBLE else View.GONE
-        for ((view, b) in tabMap) b.background = bg(if (view === v) 0xFF1E6BFF.toInt() else 0xFF171C27.toInt(), dp(14).toFloat()) }
+    fun show(v: View) { for (x in listOf<View>(grid, rollBox, tlBox, mixBox, projBox)) x.visibility = if (x === v) View.VISIBLE else View.GONE
+        for ((view, b) in tabMap) b.background = bg(if (view === v) 0xFF1E6BFF.toInt() else 0xFF171C27.toInt(), dp(14).toFloat())
+        if (v === projBox) refreshProjects() }
     fun active(mute: Boolean, solo: Boolean, any: Boolean) = !mute && (!any || solo)
     fun lGain(vol: Float, pan: Float) = (vol * Math.cos((pan + 1) * Math.PI / 4) * 1.414).toFloat()
     fun rGain(vol: Float, pan: Float) = (vol * Math.sin((pan + 1) * Math.PI / 4) * 1.414).toFloat()
@@ -80,12 +81,15 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         store = ProjectStore(this)
-        proj = store.listProjects().firstOrNull()?.let { store.open(it).first } ?: store.create("My Beat")
+        val last = getSharedPreferences("echo", 0).getString("last", null)
+        proj = (last?.takeIf { it in store.listProjects() } ?: store.listProjects().firstOrNull())?.let { store.open(it).first } ?: store.create("My Beat")
         load()
         fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; isAllCaps = false; setTextColor(Color.WHITE); textSize = 14f
             background = bg(0xFF1B2130.toInt(), dp(12).toFloat()); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = dp(40); setPadding(dp(14), 0, dp(14), 0); setOnClickListener { f(this) } }
         grid = Grid(this); roll = Roll(this); keys = Keys(this); tl = TL(this); headers = Headers(this); mixer = Mixer(this); leds = Leds(this)
         mixBox = HorizontalScrollView(this).apply { visibility = View.GONE; addView(mixer, FrameLayout.LayoutParams(-2, -1)) }
+        projList = LinearLayout(this).gap().apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
+        projBox = ScrollView(this).apply { visibility = View.GONE; addView(projList) }
         tlBox = LinearLayout(this).apply { visibility = View.GONE
             addView(headers, LinearLayout.LayoutParams(400, -1))
             addView(HorizontalScrollView(this@MainActivity).apply { addView(tl, FrameLayout.LayoutParams(-2, -1)) }, LinearLayout.LayoutParams(0, -1, 1f)) }
@@ -100,6 +104,7 @@ class MainActivity : AppCompatActivity() {
         recBtn = btn("\u25CF") { if (recording) { recording = false; stopEngine() } else startRec() }.also { it.setTextColor(0xFFFF3B4E.toInt()) }
         fun bpmBtn(t: String, d: Int) = btn(t) { bpm = (bpm + d).coerceIn(40.0, 240.0); bpmText.text = "%.1f BPM".format(bpm); save() }
         val loopBtn = btn("1 - $loopBars") { loopBars = loopBars % 18 + 1; it.text = "1 - $loopBars"; roll.requestLayout(); tl.requestLayout(); tl.invalidate(); save() }
+        loopBtnRef = loopBtn
         val loopSw = Switch(this).apply { isChecked = loopOn; setOnCheckedChangeListener { _, c -> loopOn = c } }
         val title = SpannableString("Echo 1 ManBand Pro").apply { setSpan(ForegroundColorSpan(0xFFFFA52A.toInt()), 15, 18, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
         val topBar = LinearLayout(this).gap().apply { gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(6)); setBackgroundColor(0xFF0F131B.toInt())
@@ -116,7 +121,7 @@ class MainActivity : AppCompatActivity() {
         val tabRow = LinearLayout(this).gap().apply { setPadding(dp(8), dp(4), dp(8), dp(4))
             fun tab(label: String, v: View?) { val b = btn(label) { if (v != null) show(v) else Toast.makeText(this@MainActivity, "Projects screen is the next thing to build", Toast.LENGTH_SHORT).show() }
                 if (v != null) tabMap[v] = b; addView(b, LinearLayout.LayoutParams(0, dp(46), 1f)) }
-            tab("\u25A6  Sequencer", grid); tab("\u266B  Piano Roll", rollBox); tab("\u2630  Timeline", tlBox); tab("\u2261  Mixer", mixBox); tab("\u25A4  Projects", null) }
+            tab("\u25A6  Sequencer", grid); tab("\u266B  Piano Roll", rollBox); tab("\u2630  Timeline", tlBox); tab("\u2261  Mixer", mixBox); tab("\u25A4  Projects", projBox) }
         val toolBar = HorizontalScrollView(this).apply { setBackgroundColor(0xFF0F131B.toInt())
             addView(LinearLayout(this@MainActivity).gap().apply { setPadding(dp(8), dp(6), dp(8), dp(6))
                 addView(btn("Undo") { undo() }); addView(btn("Redo") { redo() }); addView(btn("+ Track") { addTrack() }); addView(btn("Split") { splitSelected() }); addView(btn("Del") { deleteSelected() })
@@ -124,10 +129,11 @@ class MainActivity : AppCompatActivity() {
                 addView(btn("Oct -") { basePitch = maxOf(24, basePitch - 12); keys.invalidate(); roll.invalidate() })
                 addView(btn("Oct +") { basePitch = minOf(72, basePitch + 12); keys.invalidate(); roll.invalidate() }) }) }
         val swingText = TextView(this).apply { text = "Swing ${(swing * 100).toInt()}%"; setTextColor(Color.WHITE); setPadding(dp(8), 0, dp(8), 0) }
+        swingRef = swingText
         fun swingBtn(t: String, d: Int) = btn(t) { swing = (Math.round(swing * 100) + d).coerceIn(0, 50) / 100f; swingText.text = "Swing ${(swing * 100).toInt()}%"; save() }
         val bottom = LinearLayout(this).gap().apply { gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(8), dp(6), dp(8), dp(6)); setBackgroundColor(0xFF121723.toInt())
-            addView(btn("\u25A4 Projects") { Toast.makeText(this@MainActivity, "Projects screen is the next thing to build", Toast.LENGTH_SHORT).show() })
-            addView(TextView(this@MainActivity).apply { text = "${proj.name}.emb"; setTextColor(Color.WHITE); background = bg(0xFF1B2130.toInt(), dp(12).toFloat()); setPadding(dp(14), dp(10), dp(14), dp(10)) })
+            addView(btn("\u25A4 Projects") { show(projBox) })
+            addView(TextView(this@MainActivity).apply { text = "${proj.name}.emb"; setTextColor(Color.WHITE); background = bg(0xFF1B2130.toInt(), dp(12).toFloat()); setPadding(dp(14), dp(10), dp(14), dp(10)) }.also { chip = it })
             addView(status, LinearLayout.LayoutParams(0, -2, 1f))
             addView(btn("\u23EE") { startStep = 0; tl.invalidate() }); addView(btn("\u25B6", playAction).also { it.setTextColor(0xFF22DD33.toInt()) }); addView(btn("\u25A0") { stopEngine(); recording = false })
             addView(btn("\u23ED") { startStep = minOf((startStep / 16 + 1) * 16, loopBars * 16 - 4); tl.invalidate() })
@@ -137,7 +143,7 @@ class MainActivity : AppCompatActivity() {
             addView(btn("\u2261") { show(mixBox) }) }
         setContentView(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF0B0E14.toInt())
             addView(topBar); addView(tabRow)
-            addView(grid, LinearLayout.LayoutParams(-1, 0, 1f)); addView(rollBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(tlBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(mixBox, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(grid, LinearLayout.LayoutParams(-1, 0, 1f)); addView(rollBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(tlBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(mixBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(projBox, LinearLayout.LayoutParams(-1, 0, 1f))
             addView(toolBar); addView(bottom) })
         show(grid)
         val miss = store.missingSamples(proj)
@@ -165,7 +171,7 @@ class MainActivity : AppCompatActivity() {
 
     fun save() {
         syncSections()
-        io.execute { store.autosave(proj)
+        io.execute { try { store.autosave(proj) } catch (e: Exception) { }
             val t = java.text.SimpleDateFormat("h:mm a").format(java.util.Date())
             runOnUiThread { status.text = "  \u2713 Auto Saved $t" } }
     }
@@ -373,6 +379,74 @@ class MainActivity : AppCompatActivity() {
     @Synchronized fun redo() {
         if (redoStack.isEmpty()) { Toast.makeText(this, "Nothing to redo", Toast.LENGTH_SHORT).show(); return }
         syncSections(); undoStack.add(proj.sections.toString()); applyState(redoStack.removeAt(redoStack.size - 1))
+    }
+
+    lateinit var projBox: ScrollView
+    lateinit var projList: LinearLayout
+    lateinit var chip: TextView
+    lateinit var loopBtnRef: Button
+    lateinit var swingRef: TextView
+
+    fun toast(m: String?) = Toast.makeText(this, m ?: "Error", Toast.LENGTH_LONG).show()
+
+    fun mkBtn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; isAllCaps = false; setTextColor(Color.WHITE); textSize = 14f
+        background = bg(0xFF2A3245.toInt(), dp(12).toFloat()); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = dp(40); setPadding(dp(12), 0, dp(12), 0); setOnClickListener { f(this) } }
+
+    fun askName(title: String, initial: String, ok: (String) -> Unit) {
+        val et = EditText(this).apply { setText(initial); setSelectAllOnFocus(true) }
+        AlertDialog.Builder(this).setTitle(title).setView(et)
+            .setPositiveButton("OK") { _, _ -> val n = et.text.toString().trim(); if (n.isNotEmpty()) ok(n) }.setNegativeButton("Cancel", null).show()
+    }
+
+    fun saveNow() { if (store.dir(proj.name).exists()) { syncSections(); store.save(proj) } }
+
+    fun openProject(name: String, saveFirst: Boolean = true) {
+        stopEngine(); recording = false
+        if (saveFirst) saveNow()
+        val (p, missing) = try { store.open(name) } catch (e: Exception) { toast("Could not open: ${e.message}"); return }
+        proj = p
+        getSharedPreferences("echo", 0).edit().putString("last", name).apply()
+        notes.clear(); tracks.clear(); selected = null; for (row in pattern) row.fill(false)
+        samples.fill(null); paths.fill(null); cache.clear(); rowMute.fill(false); rowSolo.fill(false)
+        for (c in listOf(seqCh, keysCh)) { c.vol = 0.8f; c.pan = 0f; c.mute = false; c.solo = false; c.fx.reset() }
+        masterVol = 0.8f; undoStack.clear(); redoStack.clear(); startStep = 0
+        load()
+        chip.text = "${proj.name}.emb"; loopBtnRef.text = "1 - $loopBars"; swingRef.text = "Swing ${(swing * 100).toInt()}%"; bpmText.text = "%.1f BPM".format(bpm)
+        grid.invalidate(); roll.requestLayout(); roll.invalidate(); keys.invalidate(); headers.invalidate()
+        tl.requestLayout(); tl.invalidate(); mixer.requestLayout(); mixer.invalidate()
+        refreshProjects()
+        if (missing.isNotEmpty()) AlertDialog.Builder(this).setTitle("Missing samples")
+            .setMessage(missing.joinToString("\n") { it.path } + "\n\nThese files are not in the project's Samples folder. Tap a sequencer row name or a timeline track name to import a replacement.")
+            .setPositiveButton("OK", null).show()
+    }
+
+    fun refreshProjects() {
+        projList.removeAllViews()
+        val head = LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
+        head.addView(TextView(this).apply { text = "Projects"; setTextColor(Color.WHITE); textSize = 20f }, LinearLayout.LayoutParams(0, -2, 1f))
+        head.addView(mkBtn("+ New Project") { askName("New project", "My Beat") { n -> try { saveNow(); store.create(n); openProject(n, false) } catch (e: Exception) { toast(e.message) } } })
+        projList.addView(head)
+        for (n in store.listProjects()) {
+            val cur = n == proj.name
+            val row = LinearLayout(this).gap().apply { gravity = android.view.Gravity.CENTER_VERTICAL; background = bg(0xFF141923.toInt(), dp(14).toFloat()); setPadding(dp(14), dp(10), dp(10), dp(10)) }
+            val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            info.addView(TextView(this).apply { text = n + if (cur) "   (open)" else ""; setTextColor(if (cur) 0xFF22DD33.toInt() else Color.WHITE); textSize = 17f })
+            info.addView(TextView(this).apply { text = "$n.emb  \u2022  " + store.assetSummary(n); setTextColor(Color.GRAY); textSize = 12f })
+            row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(mkBtn("Open") { openProject(n); show(grid) })
+            row.addView(mkBtn("Rename") { askName("Rename project", n) { nn -> try { if (cur) saveNow(); store.rename(n, nn); if (cur) openProject(nn, false) else refreshProjects() } catch (e: Exception) { toast(e.message) } } })
+            row.addView(mkBtn("Duplicate") { askName("Duplicate as", "$n copy") { nn -> try { if (cur) saveNow(); store.duplicate(n, nn); refreshProjects() } catch (e: Exception) { toast(e.message) } } })
+            row.addView(mkBtn("Recover") { AlertDialog.Builder(this).setTitle("Recover \"$n\"")
+                .setMessage("Restore the newest autosave backup? This replaces the current project file with that backup.")
+                .setPositiveButton("Recover") { _, _ -> val rp = store.recover(n); if (rp == null) toast("No autosave backup found") else { store.save(rp); openProject(n, false) } }
+                .setNegativeButton("Cancel", null).show() })
+            row.addView(mkBtn("Delete") { AlertDialog.Builder(this).setTitle("Delete \"$n\"?")
+                .setMessage("This permanently deletes the folder \"$n\" (${store.assetSummary(n)}) with its .emb file, samples, presets and autosaves. This cannot be undone.")
+                .setPositiveButton("Delete") { _, _ -> store.delete(n)
+                    if (cur) { if (store.listProjects().isEmpty()) store.create("My Beat"); openProject(store.listProjects().first(), false) } else refreshProjects() }
+                .setNegativeButton("Cancel", null).show() })
+            projList.addView(row)
+        }
     }
 
     fun spf() = (44100 * 60 / bpm / 4).toInt()
