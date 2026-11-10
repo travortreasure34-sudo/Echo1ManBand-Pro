@@ -35,7 +35,7 @@ class Fx {
     private val lo = Biquad(); private val mid = Biquad(); private val hi = Biquad()
     private var cL = 99f; private var cM = 99f; private var cH = 99f
     private var on = false; private var eqOn = false
-    private var pComp = false; private var pTh = -18f; private var pRa = 4f; private var mk = 1f; private var env = 0f
+    private var cc = 0; private var gr = 1f; private var pComp = false; private var pTh = -18f; private var pRa = 4f; private var mk = 1f; private var env = 0f
     private val dbuf = FloatArray(44100); private var dp = 0; private var pDN = 1; private var pDMix = 0f; private var pDFb = 0f
     private val combs = arrayOf(FloatArray(1116), FloatArray(1188), FloatArray(1277), FloatArray(1356))
     private val aps = arrayOf(FloatArray(556), FloatArray(441))
@@ -64,9 +64,8 @@ class Fx {
         if (pComp) {
             val l = abs(x) / 32768f
             env += (l - env) * (if (l > env) 0.0045f else 0.0002f)
-            val over = 20f * log10(env + 1e-6f) - pTh
-            if (over > 0f) x *= 10f.pow(-over * (1 - 1 / pRa) / 20f)
-            x *= mk
+            if ((cc++ and 15) == 0) { val over = 20f * log10(env + 1e-6f) - pTh; gr = if (over > 0f) 10f.pow(-over * (1 - 1 / pRa) / 20f) else 1f }
+            x *= gr * mk
         }
         if (pDMix > 0f) {
             val d = dbuf[(dp - pDN + dbuf.size) % dbuf.size]
