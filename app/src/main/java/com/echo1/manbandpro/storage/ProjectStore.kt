@@ -189,13 +189,6 @@ class ProjectStore(context: Context) {
     }
     fun delete(name: String) { dir(name).deleteRecursively() }
 
-    // Edited audio goes to "Edited Samples/"; the original in "Samples/" is never touched.
-    fun saveEdited(p: EmbProject, wav: ByteArray, name: String): SampleRef {
-        val f = uniqueFile(File(dir(p.name), "Edited Samples").apply { mkdirs() }, sanitize(name))
-        atomicWrite(f, wav)
-        return SampleRef("Edited Samples/${f.name}", sha256(f)).also { p.samples.add(it) }
-    }
-
     // ---- Helpers ----
     private fun atomicWrite(target: File, bytes: ByteArray) {
         val tmp = File(target.parentFile, target.name + ".tmp")
