@@ -3,6 +3,7 @@ package com.echo1.manbandpro
 import android.Manifest
 import android.content.Context
 import android.content.res.Configuration
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
@@ -46,7 +47,7 @@ class MainActivity : AppCompatActivity() {
     fun show(v: View) { for (x in listOf<View>(grid, rollBox, tlBox, mixBox, projBox, edBox)) x.visibility = if (x === v) View.VISIBLE else View.GONE
         for ((view, b) in tabMap) b.background = bg(if (view === v) 0xFF3B7DD8.toInt() else 0xFF3A3A3E.toInt(), dp(14).toFloat())
         if (v === projBox) refreshProjects()
-        toolBarRef.visibility = if (v === edBox || v === projBox || v === mixBox) View.GONE else View.VISIBLE
+        toolBarRef.visibility = if (v === tlBox || v === rollBox) View.VISIBLE else View.GONE
         if (v !== edBox) edStop() }
     fun active(mute: Boolean, solo: Boolean, any: Boolean) = !mute && (!any || solo)
     fun lGain(vol: Float, pan: Float) = (vol * Math.cos((pan + 1) * Math.PI / 4) * 1.414).toFloat()
@@ -92,6 +93,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        requestedOrientation = orients[orientPref()]
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         store = ProjectStore(this)
         val last = getSharedPreferences("echo", 0).getString("last", null)
@@ -139,7 +141,7 @@ class MainActivity : AppCompatActivity() {
         val title = SpannableString("Echo 1 ManBand Pro").apply { setSpan(ForegroundColorSpan(0xFFFFA52A.toInt()), 15, 18, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
         val topBar = LinearLayout(this).gap().apply { gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(6)); setBackgroundColor(0xFF2F2F33.toInt())
             addView(ImageView(this@MainActivity).apply { setImageResource(R.mipmap.ic_launcher) }, LinearLayout.LayoutParams(dp(44), dp(44)))
-            addView(TextView(this@MainActivity).apply { text = title; setTextColor(Color.WHITE); textSize = 18f; isSingleLine = true; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC); setPadding(dp(10), 0, dp(10), 0) }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(btn("Undo") { undo() }); addView(btn("Redo") { redo() }); addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
             addView(playBtn); addView(stopBtn); addView(recBtn)
             addView(LinearLayout(this@MainActivity).apply { gravity = android.view.Gravity.CENTER_VERTICAL; background = bg(0xFF2B2B2E.toInt(), dp(14).toFloat())
                 addView(bpmBtn("\u2212", -1)); addView(bpmText); addView(bpmBtn("+", 1))
@@ -147,14 +149,14 @@ class MainActivity : AppCompatActivity() {
             addView(LinearLayout(this@MainActivity).gap().apply { gravity = android.view.Gravity.CENTER_VERTICAL; background = bg(0xFF2B2B2E.toInt(), dp(14).toFloat()); setPadding(dp(10), 0, dp(4), 0)
                 addView(TextView(this@MainActivity).apply { text = "Loop:"; setTextColor(Color.WHITE) }); addView(loopSw); addView(loopBtn) })
             addView(btn("\u2699") { AlertDialog.Builder(this@MainActivity).setTitle("Settings")
-                .setItems(arrayOf("Metronome: " + (if (metroOn) "On" else "Off"), "Count-in before recording: $countBars bar(s)")) { _, w -> if (w == 0) metroOn = !metroOn else countBars = (countBars + 1) % 3; save() }.show() }) }
+                .setItems(arrayOf("Metronome: " + (if (metroOn) "On" else "Off"), "Count-in before recording: $countBars bar(s)", "Screen orientation: " + orientName())) { _, w -> if (w == 0) metroOn = !metroOn else if (w == 1) countBars = (countBars + 1) % 3 else cycleOrientation(); save() }.show() }) }
         val tabRow = LinearLayout(this).gap().apply { setPadding(dp(8), dp(4), dp(8), dp(4))
             fun tab(label: String, v: View?) { val b = btn(label) { if (v != null) show(v) else Toast.makeText(this@MainActivity, "Projects screen is the next thing to build", Toast.LENGTH_SHORT).show() }
-                if (v != null) tabMap[v] = b; addView(b, LinearLayout.LayoutParams(0, dp(38), 1f)) }
+                if (v != null) tabMap[v] = b; addView(b, LinearLayout.LayoutParams(-2, dp(38), 1f)) }
             tab("\u2630  Timeline", tlBox); tab("\u25A6  Sequencer", grid); tab("\u266B  Piano Roll", rollBox); tab("\u2261  Mixer", mixBox); tab("\u2702  Editor", edBox); tab("\u25A4  Projects", projBox) }
         val toolBar = HorizontalScrollView(this).apply { setBackgroundColor(0xFF2F2F33.toInt())
             addView(LinearLayout(this@MainActivity).gap().apply { setPadding(dp(8), dp(6), dp(8), dp(6))
-                addView(btn("Undo") { undo() }); addView(btn("Redo") { redo() }); addView(btn("+ Track") { addTrack() }); addView(btn("Split") { splitSelected() }); addView(btn("Del") { deleteSelected() })
+                addView(btn("+ Track") { addTrack() }); addView(btn("Split") { splitSelected() }); addView(btn("Del") { deleteSelected() })
                 addView(btn("Len: $noteLen") { noteLen = when (noteLen) { 1 -> 2; 2 -> 4; 4 -> 8; else -> 1 }; it.text = "Len: $noteLen" })
                 addView(btn("Oct -") { basePitch = maxOf(24, basePitch - 12); keys.invalidate(); roll.invalidate() })
                 addView(btn("Oct +") { basePitch = minOf(72, basePitch + 12); keys.invalidate(); roll.invalidate() }) }) }
@@ -173,9 +175,9 @@ class MainActivity : AppCompatActivity() {
             addView(leds, LinearLayout.LayoutParams(dp(90), dp(32)))
             addView(btn("\u2261") { show(mixBox) }) }
         setContentView(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF232326.toInt())
-            addView(topBar); addView(tabRow)
+            addView(hs(topBar)); addView(hs(tabRow))
             addView(grid, LinearLayout.LayoutParams(-1, 0, 1f)); addView(rollBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(tlBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(mixBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(projBox, LinearLayout.LayoutParams(-1, 0, 1f)); addView(edBox, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(toolBar); addView(bottom) })
+            addView(toolBar); addView(hs(bottom)) })
         show(tlBox)
         val miss = store.missingSamples(proj)
         if (miss.isNotEmpty()) Toast.makeText(this, "Missing samples: " + miss.joinToString { it.path } + " (tap the row name to replace)", Toast.LENGTH_LONG).show()
@@ -540,6 +542,14 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) { runOnUiThread { toast("Save failed: ${e.message}") } }
         }
     }
+
+    val orients = intArrayOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE, ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT)
+    // phones default to landscape, tablets to auto-rotate
+    fun orientPref() = getSharedPreferences("echo", 0).getInt("orient", if (resources.configuration.smallestScreenWidthDp < 600) 1 else 0)
+    fun orientName() = arrayOf("Auto", "Landscape", "Portrait")[orientPref()]
+    fun cycleOrientation() { val n = (orientPref() + 1) % 3; getSharedPreferences("echo", 0).edit().putInt("orient", n).apply(); requestedOrientation = orients[n] }
+    // bars scroll sideways instead of clipping on narrow screens; weights still fill wide screens
+    fun hs(v: View) = HorizontalScrollView(this).apply { isFillViewport = true; isHorizontalScrollBarEnabled = false; addView(v) }
 
     fun spf() = (44100 * 60 / bpm / 4).toInt()
 
@@ -909,9 +919,9 @@ class MainActivity : AppCompatActivity() {
 
     inner class Grid(c: Context) : View(c) {
         @Volatile var playStep = -1
-        val p = Paint(Paint.ANTI_ALIAS_FLAG); val lw = dp(224).toFloat(); val top = dp(44).toFloat()
+        val p = Paint(Paint.ANTI_ALIAS_FLAG); var lw = dp(224).toFloat(); val top = dp(44).toFloat()
         override fun onDraw(cv: Canvas) {
-            val rh = (height - top) / 7f; val cw = (width - lw) / 16f; val rad = dp(6).toFloat(); val m = dp(3).toFloat()
+            lw = minOf(dp(224).toFloat(), width * 0.34f); val rh = (height - top) / 7f; val cw = (width - lw) / 16f; val rad = dp(6).toFloat(); val m = dp(3).toFloat(); val iz = minOf(dp(36).toFloat(), rh * 0.8f); val tz = minOf(dp(15).toFloat(), rh * 0.42f); val bz = minOf(dp(34).toFloat(), rh * 0.8f)
             val anyS = rowSolo.any { it }
             p.style = Paint.Style.FILL
             p.textSize = dp(14).toFloat(); p.color = Color.WHITE
@@ -921,21 +931,22 @@ class MainActivity : AppCompatActivity() {
             for (r in 0 until 7) { val y = top + r * rh
                 p.color = (colors[r] and 0x00FFFFFF) or 0x18000000; cv.drawRect(lw, y, width.toFloat(), y + rh, p)
                 p.color = 0xFF2B2B2E.toInt(); cv.drawRect(0f, y, lw - dp(4), y + rh, p)
-                p.color = colors[r]; cv.drawRoundRect(dp(8).toFloat(), y + (rh - dp(36)) / 2, dp(44).toFloat(), y + (rh + dp(36)) / 2, dp(8).toFloat(), dp(8).toFloat(), p)
-                p.color = Color.WHITE; p.textSize = dp(18).toFloat(); cv.drawText(names[r].take(1), dp(20).toFloat(), y + rh / 2 + dp(6), p)
-                p.textSize = dp(15).toFloat(); cv.drawText(names[r], dp(52).toFloat(), y + rh / 2 + dp(5), p)
-                if (samples[r] == null) { p.color = Color.GRAY; cv.drawText("+", dp(52) + p.measureText(names[r]) + dp(6), y + rh / 2 + dp(5), p) }
-                val by = y + (rh - dp(34)) / 2; val bh = by + dp(34)
+                p.color = colors[r]; cv.drawRoundRect(dp(8).toFloat(), y + (rh - iz) / 2, dp(8) + iz, y + (rh + iz) / 2, dp(6).toFloat(), dp(6).toFloat(), p)
+                p.color = Color.WHITE; p.textSize = iz * 0.5f; p.textAlign = Paint.Align.CENTER; cv.drawText(names[r].take(1), dp(8) + iz / 2, y + rh / 2 + iz * 0.18f, p); p.textAlign = Paint.Align.LEFT
+                p.textSize = tz; if (lw >= dp(200)) cv.drawText(names[r], dp(16) + iz, y + rh / 2 + tz * 0.35f, p)
+                if (samples[r] == null && lw >= dp(200)) { p.color = Color.GRAY; cv.drawText("+", dp(16) + iz + p.measureText(names[r]) + dp(6), y + rh / 2 + tz * 0.35f, p) }
+                val by = y + (rh - bz) / 2; val bh = by + bz
                 p.color = if (rowSolo[r]) 0xFF22DD33.toInt() else 0xFF505055.toInt(); cv.drawRoundRect(lw - dp(88), by, lw - dp(48), bh, dp(8).toFloat(), dp(8).toFloat(), p)
                 p.color = if (rowMute[r]) 0xFFFFB020.toInt() else 0xFF505055.toInt(); cv.drawRoundRect(lw - dp(44), by, lw - dp(8), bh, dp(8).toFloat(), dp(8).toFloat(), p)
-                p.color = Color.WHITE; p.textSize = dp(15).toFloat()
-                cv.drawText("S", lw - dp(74), by + dp(23), p); cv.drawText("M", lw - dp(32), by + dp(23), p)
+                p.color = Color.WHITE; p.textSize = tz; p.textAlign = Paint.Align.CENTER
+                cv.drawText("S", lw - dp(68), by + bz / 2 + tz * 0.35f, p); cv.drawText("M", lw - dp(26), by + bz / 2 + tz * 0.35f, p); p.textAlign = Paint.Align.LEFT
                 for (st in 0 until 16) {
                     p.color = if (pattern[r][st]) (if (rowMute[r] || (anyS && !rowSolo[r])) 0xFF555B6A.toInt() else colors[r]) else if (st / 4 % 2 == 0) 0xFF1A1F2B.toInt() else 0xFF151A25.toInt()
                     cv.drawRoundRect(lw + st * cw + m, y + m, lw + (st + 1) * cw - m, y + rh - m, rad, rad, p) } }
             if (playStep >= 0) { p.color = Color.WHITE; val px = lw + playStep * cw + cw / 2; cv.drawRect(px - 2, top - dp(20), px + 2, height.toFloat(), p) }
         }
         override fun onTouchEvent(e: MotionEvent): Boolean {
+            lw = minOf(dp(224).toFloat(), width * 0.34f)
             if (e.action != MotionEvent.ACTION_DOWN || e.y < top) return true
             val r = ((e.y - top) / ((height - top) / 7f)).toInt().coerceIn(0, 6)
             if (e.x < lw) {
